@@ -1,3 +1,12 @@
 asgiref
+certifi
+charset-normalizer
 Django
+django-cors-headers
+djangorestframework
+djangorestframework_simplejwt
+idna
+PyJWT
+requests
 sqlparse
+urllib3
