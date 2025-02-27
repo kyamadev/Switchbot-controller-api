@@ -145,8 +145,8 @@ STATIC_URL = 'static/'
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 CORS_ALLOW_ALL_ORIGINS = False  # 全てのオリジンを許可しない
-CORS_ALLOWED_ORIGINS = [
-    "http://localhost:3000",
-]
+CORS_ORIGINS_STRING = os.environ.get("CORS_ALLOWED_ORIGINS", "http://localhost:3000")
+
+CORS_ALLOWED_ORIGINS = [origin.strip() for origin in CORS_ORIGINS_STRING.split(",")]
 
 CORS_ALLOW_CREDENTIALS = True
