@@ -12,6 +12,7 @@ from .serializers import (
 )
 from .models import SwitchBotCredential
 from .utils import SwitchBotAPI
+from .rate_limiter import RateLimiter
 
 User = get_user_model()
 logger = logging.getLogger(__name__)
@@ -113,6 +114,28 @@ class DeviceStatusView(APIView):
 class DeviceCommandView(APIView):
     permission_classes = [IsAuthenticated]
     
+    def post(self, request, deviceID, command):
+        param_value = request.data.get("param", "default")
+        result, error = SwitchBotAPI.send_command(request.user, deviceID, command, param_value)
+        
+        if error:
+            return Response({"detail": error}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(result)
+
+class DeviceStatusView(APIView):
+    permission_classes = [IsAuthenticated]
+    
+    @RateLimiter.limit_api_calls
+    def get(self, request, deviceId):
+        status_data, error = SwitchBotAPI.get_device_status(request.user, deviceId)
+        if error:
+            return Response({"detail": error}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(status_data)
+
+class DeviceCommandView(APIView):
+    permission_classes = [IsAuthenticated]
+    
+    @RateLimiter.limit_api_calls
     def post(self, request, deviceID, command):
         param_value = request.data.get("param", "default")
         result, error = SwitchBotAPI.send_command(request.user, deviceID, command, param_value)

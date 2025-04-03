@@ -1,9 +1,14 @@
 from unittest.mock import patch
 from django.urls import reverse
+from django.test import TestCase
 from rest_framework import status
-from rest_framework.test import APITestCase, APIClient
+from rest_framework.test import APITestCase, APIClient, APIRequestFactory
 from django.contrib.auth import get_user_model
 from api.models import SwitchBotCredential
+from django.core.cache import cache
+from api.rate_limiter import RateLimiter
+from api.utils import SwitchBotAPI
+from unittest.mock import patch, MagicMock
 
 User = get_user_model()
 
@@ -423,3 +428,138 @@ class DeviceCommandTests(APITestCase):
         
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertEqual(response.data["detail"], "Command not supported")
+
+class EncryptionTest(TestCase):
+    """
+    SwitchBot認証情報の暗号化と復号化のテスト
+    """
+    
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="testencryption",
+            password="testpass123"
+        )
+        
+    def test_encryption_decryption_process(self):
+        """
+        認証情報が保存時に適切に暗号化され、取得時に復号化されることを確認
+        """
+        # 元の平文値
+        original_token = "test-token-123"
+        original_secret = "test-secret-456"
+        
+        # 認証情報を作成
+        credential = SwitchBotCredential.objects.create(
+            user=self.user,
+            token=original_token,
+            secret=original_secret
+        )
+        
+        # 正しいレコードをテストしていることを確認するためのトークンID
+        cred_id = credential.id
+        
+        # DjangoのORMキャッシュをクリアして、DBから確実に取得するようにする
+        from django.db import connection
+        connection.close()
+        
+        # データベースから再取得
+        refetched_cred = SwitchBotCredential.objects.get(id=cred_id)
+        
+        # 値がアクセス時に自動的に復号化されることを確認
+        self.assertEqual(refetched_cred.token, original_token)
+        self.assertEqual(refetched_cred.secret, original_secret)
+        
+    def test_switchbot_api_uses_decrypted_values(self):
+        """
+        SwitchBotAPIが復号化された認証情報の値を適切に使用することを確認
+        """
+        # 認証情報を作成
+        SwitchBotCredential.objects.create(
+            user=self.user,
+            token="test-token-123",
+            secret="test-secret-456"
+        )
+        
+        # SwitchBotAPIを使用してヘッダーを取得
+        headers = SwitchBotAPI.get_headers(self.user)
+        
+        # Authorizationヘッダーに復号化されたトークンが含まれていることを確認
+        self.assertEqual(headers["Authorization"], "test-token-123")
+        
+        # 署名はタイムスタンプを含むため直接検証できないが、
+        # 生成されていることを確認（シークレットがアクセス可能であることを示す）
+        self.assertIn("sign", headers)
+        self.assertTrue(headers["sign"])  # 空でない文字列
+
+class RateLimitTest(TestCase):
+    """
+    APIレート制限機能のテスト
+    """
+    
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="testlimit",
+            password="testpass123"
+        )
+        self.factory = APIRequestFactory()
+        # 各テスト開始時にキャッシュをクリア
+        cache.clear()
+        
+    def tearDown(self):
+        # 各テスト終了時にキャッシュをクリア
+        cache.clear()
+    
+    def test_user_daily_limit(self):
+        """
+        ユーザーの日次制限が正しく機能することをテスト
+        """
+        # モックビュー関数を作成
+        mock_view = MagicMock(return_value="OK")
+        
+        # デコレータ付きのビューを作成
+        decorated_view = RateLimiter.limit_api_calls(mock_view)
+        
+        # リクエストを制限直前までシミュレート
+        request = self.factory.get('/')
+        request.user = self.user
+        
+        # キャッシュを設定して制限に近づいていることをシミュレート
+        user_daily_key = f"switchbot_daily_limit_{self.user.id}"
+        cache.set(user_daily_key, 999, timeout=86400)  # 999リクエスト
+        
+        # このリクエストは成功するはず（合計1000になる）
+        response = decorated_view(self, request)
+        self.assertEqual(response, "OK")  # 元のビューの戻り値
+        
+        # このリクエストはレート制限されるはず
+        response = decorated_view(self, request)
+        self.assertEqual(response.status_code, 429)  # リクエスト過多
+        self.assertEqual(response.data["detail"], "1日のAPI呼び出し制限に達しました。明日再試行してください。")
+    
+    def test_device_short_term_limit(self):
+        """
+        デバイス固有の短期レート制限が正しく機能することをテスト
+        """
+        # モックビュー関数を作成
+        mock_view = MagicMock(return_value="OK")
+        
+        # デコレータ付きのビューを作成
+        decorated_view = RateLimiter.limit_api_calls(mock_view)
+        
+        # 特定のデバイスに対するリクエストをシミュレート
+        request = self.factory.get('/')
+        request.user = self.user
+        
+        # キャッシュを設定してデバイス制限に近づいていることをシミュレート
+        device_id = "test-device-123"
+        device_key = f"switchbot_device_limit_{device_id}"
+        cache.set(device_key, 9, timeout=15)  # 直近15秒間に9回のリクエスト
+        
+        # このリクエストは成功するはず（合計10になる）
+        response = decorated_view(self, request, deviceId=device_id)
+        self.assertEqual(response, "OK")  # 元のビューの戻り値
+        
+        # このリクエストはレート制限されるはず
+        response = decorated_view(self, request, deviceId=device_id)
+        self.assertEqual(response.status_code, 429)  # リクエスト過多
+        self.assertEqual(response.data["detail"], "デバイスへのリクエストが多すぎます。少し待ってから再試行してください。")

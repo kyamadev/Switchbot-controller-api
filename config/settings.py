@@ -9,7 +9,7 @@ https://docs.djangoproject.com/en/5.1/topics/settings/
 For the full list of settings and their values, see
 https://docs.djangoproject.com/en/5.1/ref/settings/
 """
-import os
+import os, base64
 from pathlib import Path
 from datetime import timedelta
 
@@ -219,4 +219,18 @@ LOGGING = {
             'propagate': False,
         },
     },
+}
+
+ENCRYPTION_KEY = os.environ.get('ENCRYPTION_KEY', None)
+if ENCRYPTION_KEY is None and not DEBUG:
+    # Generate a key for development only
+    ENCRYPTION_KEY = base64.urlsafe_b64encode(os.urandom(32)).decode()
+    print("警告: 暗号化キーが環境変数で設定されていません。ランダムに生成された一時的なキーを使用します。")
+    print("コンテナ再起動時にデータが読めなくなる可能性があります。")
+
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.redis.RedisCache" if IS_PRODUCTION else "django.core.cache.backends.locmem.LocMemCache",
+        "LOCATION": os.environ.get("REDIS_URL", "redis://redis:6379/1") if IS_PRODUCTION else "ratelimit",
+    }
 }

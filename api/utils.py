@@ -13,13 +13,19 @@ SWITCHBOT_BASE_URL = "https://api.switch-bot.com/v1.1"
 class SwitchBotAPI:
     @staticmethod
     def get_headers(user):
-        """Generate SwitchBot API headers for authentication"""
         cred = getattr(user, 'switchbot_credential', None)
         if not cred:
             return None
             
         token = cred.token
         secret = cred.secret
+        
+        # Log warning if credentials appear to still be encrypted
+        # (this should never happen with proper EncryptedField implementation)
+        if token.startswith('gAAAAA') or secret.startswith('gAAAAA'):
+            logger.error(f"Retrieved credentials appear to be still encrypted for user {user.id}")
+            return None
+            
         t = str(int(round(time.time() * 1000)))
         nonce = str(uuid.uuid4())
         string_to_sign = token + t + nonce
