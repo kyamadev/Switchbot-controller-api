@@ -13,36 +13,41 @@ SWITCHBOT_BASE_URL = "https://api.switch-bot.com/v1.1"
 class SwitchBotAPI:
     @staticmethod
     def get_headers(user):
+        """Get authentication headers for SwitchBot API"""
         cred = getattr(user, 'switchbot_credential', None)
         if not cred:
+            logger.warning(f"No SwitchBot credentials found for user {user.id}")
             return None
             
         token = cred.token
         secret = cred.secret
         
-        # Log warning if credentials appear to still be encrypted
-        # (this should never happen with proper EncryptedField implementation)
-        if token.startswith('gAAAAA') or secret.startswith('gAAAAA'):
-            logger.error(f"Retrieved credentials appear to be still encrypted for user {user.id}")
+        # 空文字列チェック
+        if not token or not secret:
+            logger.error(f"Empty credentials for user {user.id}")
             return None
             
-        t = str(int(round(time.time() * 1000)))
-        nonce = str(uuid.uuid4())
-        string_to_sign = token + t + nonce
-        signature = hmac.new(
-            key=secret.encode('utf-8'),
-            msg=string_to_sign.encode('utf-8'),
-            digestmod=hashlib.sha256
-        ).digest()
-        sign = base64.b64encode(signature).decode('utf-8').upper()
+        try:
+            t = str(int(round(time.time() * 1000)))
+            nonce = str(uuid.uuid4())
+            string_to_sign = token + t + nonce
+            signature = hmac.new(
+                key=secret.encode('utf-8'),
+                msg=string_to_sign.encode('utf-8'),
+                digestmod=hashlib.sha256
+            ).digest()
+            sign = base64.b64encode(signature).decode('utf-8').upper()
 
-        return {
-            "Authorization": token,
-            "Content-Type": "application/json",
-            "t": t,
-            "sign": sign,
-            "nonce": nonce
-        }
+            return {
+                "Authorization": token,
+                "Content-Type": "application/json",
+                "t": t,
+                "sign": sign,
+                "nonce": nonce
+            }
+        except Exception as e:
+            logger.error(f"Error generating SwitchBot headers: {str(e)}")
+            return None
     
     @staticmethod
     def get_devices(user):

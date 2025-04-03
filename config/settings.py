@@ -221,13 +221,6 @@ LOGGING = {
     },
 }
 
-ENCRYPTION_KEY = os.environ.get('ENCRYPTION_KEY', None)
-if ENCRYPTION_KEY is None and not DEBUG:
-    # Generate a key for development only
-    ENCRYPTION_KEY = base64.urlsafe_b64encode(os.urandom(32)).decode()
-    print("警告: 暗号化キーが環境変数で設定されていません。ランダムに生成された一時的なキーを使用します。")
-    print("コンテナ再起動時にデータが読めなくなる可能性があります。")
-
 CACHES = {
     "default": {
         "BACKEND": "django.core.cache.backends.redis.RedisCache" if IS_PRODUCTION else "django.core.cache.backends.locmem.LocMemCache",
