@@ -16,7 +16,7 @@ class RegisterSerializer(serializers.Serializer):
     def create(self, validated_data):
         user = User(
             username=validated_data['username'],
-            is_active=True,  # デフォルトモデルでFalseになっているのでTrueに変更
+            is_active=True,
         )
         user.set_password(validated_data['password'])
         user.save()
